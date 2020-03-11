@@ -8,6 +8,8 @@ import cn.xpbootcamp.legacy_code.utils.RedisDistributedLock;
 import javax.transaction.InvalidTransactionException;
 
 public class WalletTransaction {
+    public static final int MAX_PAY_TIME = 20 * 24 * 3600 * 1000;
+    public static final String PREFIX_OF_TRANS_ID = "t_";
     private String id;
     private Long buyerId;
     private Long sellerId;
@@ -29,14 +31,7 @@ public class WalletTransaction {
     }
 
     public WalletTransaction(String preAssignedId, Long buyerId, Long sellerId, Long productId, String orderId, Double amount) {
-        if (preAssignedId != null && !preAssignedId.isEmpty()) {
-            this.id = preAssignedId;
-        } else {
-            this.id = IdGenerator.generateTransactionId();
-        }
-        if (!this.id.startsWith("t_")) {
-            this.id = "t_" + preAssignedId;
-        }
+        setId(preAssignedId);
         this.buyerId = buyerId;
         this.sellerId = sellerId;
         this.productId = productId;
@@ -46,11 +41,22 @@ public class WalletTransaction {
         this.amount = amount;
     }
 
+    private void setId(String preAssignedId) {
+        if (preAssignedId != null && !preAssignedId.isEmpty()) {
+            this.id = preAssignedId;
+        } else {
+            this.id = IdGenerator.generateTransactionId();
+        }
+        if (!this.id.startsWith(PREFIX_OF_TRANS_ID)) {
+            this.id = PREFIX_OF_TRANS_ID + preAssignedId;
+        }
+    }
+
     public boolean execute() throws InvalidTransactionException {
         if (buyerId == null || (sellerId == null || amount < 0.0)) {
             throw new InvalidTransactionException("This is an invalid transaction");
         }
-        if (status == STATUS.EXECUTED) return true;
+        if (isPayed()) return true;
         boolean isLocked = false;
         try {
             isLocked = distributedLock.lock(id);
@@ -59,27 +65,37 @@ public class WalletTransaction {
             if (!isLocked) {
                 return false;
             }
-            if (status == STATUS.EXECUTED) return true; // double check
-            long executionInvokedTimestamp = System.currentTimeMillis();
-            // 交易超过20天
-            if (executionInvokedTimestamp - createdTimestamp > 1728000000) {
+            if (isPayed()) return true; // double check
+            if (isExpired()) {
                 this.status = STATUS.EXPIRED;
                 return false;
             }
-            String walletTransactionId = walletService.moveMoney(id, buyerId, sellerId, amount);
-            if (walletTransactionId != null) {
-                this.walletTransactionId = walletTransactionId;
-                this.status = STATUS.EXECUTED;
-                return true;
-            } else {
-                this.status = STATUS.FAILED;
-                return false;
-            }
+            return pay();
         } finally {
             if (isLocked) {
                 distributedLock.unlock(id);
             }
         }
+    }
+
+    private boolean isPayed() {
+        return status == STATUS.EXECUTED;
+    }
+
+    private boolean pay() {
+        String walletTransactionId = walletService.moveMoney(id, buyerId, sellerId, amount);
+        if (walletTransactionId != null) {
+            this.walletTransactionId = walletTransactionId;
+            this.status = STATUS.EXECUTED;
+            return true;
+        } else {
+            this.status = STATUS.FAILED;
+            return false;
+        }
+    }
+
+    private boolean isExpired() {
+        return System.currentTimeMillis() - createdTimestamp > MAX_PAY_TIME;
     }
 
 }
