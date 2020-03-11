@@ -56,15 +56,13 @@ public class WalletTransaction {
         if (buyerId == null || (sellerId == null || amount < 0.0)) {
             throw new InvalidTransactionException("This is an invalid transaction");
         }
-        if (isPayed()) return true;
+        if (isPayed()) { return true; }
         boolean isLocked = false;
         try {
             isLocked = distributedLock.lock(id);
-            
-            if (!isLocked) {
-                return false;
-            }
-            if (isPayed()) return true;
+
+            if (!isLocked) { return false; }
+            if (isPayed()) { return true; }
             if (isExpired()) {
                 this.status = STATUS.EXPIRED;
                 return false;
