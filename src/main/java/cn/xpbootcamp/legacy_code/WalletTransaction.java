@@ -2,7 +2,6 @@ package cn.xpbootcamp.legacy_code;
 
 import cn.xpbootcamp.legacy_code.enums.STATUS;
 import cn.xpbootcamp.legacy_code.service.WalletService;
-import cn.xpbootcamp.legacy_code.service.WalletServiceImpl;
 import cn.xpbootcamp.legacy_code.utils.IdGenerator;
 import cn.xpbootcamp.legacy_code.utils.RedisDistributedLock;
 
@@ -18,9 +17,18 @@ public class WalletTransaction {
     private Double amount;
     private STATUS status;
     private String walletTransactionId;
+    private RedisDistributedLock distributedLock;
+    private WalletService walletService;
 
+    public void setDistributedLock(RedisDistributedLock distributedLock) {
+        this.distributedLock = distributedLock;
+    }
 
-    public WalletTransaction(String preAssignedId, Long buyerId, Long sellerId, Long productId, String orderId) {
+    public void setWalletService(WalletService walletService) {
+        this.walletService = walletService;
+    }
+
+    public WalletTransaction(String preAssignedId, Long buyerId, Long sellerId, Long productId, String orderId, Double amount) {
         if (preAssignedId != null && !preAssignedId.isEmpty()) {
             this.id = preAssignedId;
         } else {
@@ -35,6 +43,7 @@ public class WalletTransaction {
         this.orderId = orderId;
         this.status = STATUS.TO_BE_EXECUTED;
         this.createdTimestamp = System.currentTimeMillis();
+        this.amount = amount;
     }
 
     public boolean execute() throws InvalidTransactionException {
@@ -44,7 +53,7 @@ public class WalletTransaction {
         if (status == STATUS.EXECUTED) return true;
         boolean isLocked = false;
         try {
-            isLocked = RedisDistributedLock.getSingletonInstance().lock(id);
+            isLocked = distributedLock.lock(id);
 
             // 锁定未成功，返回false
             if (!isLocked) {
@@ -57,7 +66,6 @@ public class WalletTransaction {
                 this.status = STATUS.EXPIRED;
                 return false;
             }
-            WalletService walletService = new WalletServiceImpl();
             String walletTransactionId = walletService.moveMoney(id, buyerId, sellerId, amount);
             if (walletTransactionId != null) {
                 this.walletTransactionId = walletTransactionId;
@@ -69,7 +77,7 @@ public class WalletTransaction {
             }
         } finally {
             if (isLocked) {
-                RedisDistributedLock.getSingletonInstance().unlock(id);
+                distributedLock.unlock(id);
             }
         }
     }
