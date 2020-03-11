@@ -60,12 +60,11 @@ public class WalletTransaction {
         boolean isLocked = false;
         try {
             isLocked = distributedLock.lock(id);
-
-            // 锁定未成功，返回false
+            
             if (!isLocked) {
                 return false;
             }
-            if (isPayed()) return true; // double check
+            if (isPayed()) return true;
             if (isExpired()) {
                 this.status = STATUS.EXPIRED;
                 return false;
